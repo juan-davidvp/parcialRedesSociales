@@ -1,7 +1,5 @@
 // 1. --- IMPORTACIONES ---
-// Importamos el Modelo para poder interactuar con la Base de Datos.
 const UsuarioModel = require('../models/modelUsuario.js');
-// Importamos JWT para crear los tokens de sesión.
 const jwt = require('jsonwebtoken');
 
 // El "secreto" para firmar los JWT. En producción, ESTO DEBE ESTAR en variables de entorno (.env).
