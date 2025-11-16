@@ -26,9 +26,9 @@ const modelRelaciones = {};
  * (Funcionalidad POST /follows)
  * Crea una nueva relación de seguimiento en la tabla Follows.
  *
- * @param {string} usuario_principal_username - El usuario que está SIENDO seguido.
- * @param {string} usuario_seguidor_username - El usuario que ESTÁ siguiendo (autenticado).
- * @returns {object} - El resultado de la inserción.
+ * @param {string} usuario_principal_username 
+ * @param {string} usuario_seguidor_username 
+ * @returns {object}
  */
 modelRelaciones.crear = async (usuario_principal_username, usuario_seguidor_username) => {
     try {

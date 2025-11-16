@@ -4,6 +4,7 @@ const axios = require('axios');
 
 // URL base del microservicio de Usuarios (debe estar en .env)
 const USUARIOS_API_URL = process.env.USUARIOS_API_URL || 'http://localhost:3310/redesSocial/usuarios';
+const MENSAJES_API_URL = 'http://localhost:3308/redesSocial/mensajes';
 
 
 const controllerRelaciones = {};
@@ -100,46 +101,93 @@ controllerRelaciones.crearFollow = async (req, res) => {
  */
 controllerRelaciones.obtenerSeguidos = async (req, res) => {
     const { username } = req.params;
-    console.log(`[controllerFollow] INFO: Inicia GET /follows/siguiendo/${username}`);
+    const authHeader = req.headers['authorization'];
+    console.log(`[controllerRelaciones] INFO: Inicia GET /timeline (Timeline para: ${username})`);
 
     try {
-
+        // 1. AUTENTICACIÓN MANUAL (Como ya lo tienes)
+        // (Verifica que el usuario que pide el timeline esté logueado)
         try {
-            console.log(`[controllerFollow] INFO: Verificando existencia de ${username} en Microservicio Usuarios...`);
+            console.log(`[controllerRelaciones] INFO: Verificando autenticación de ${username}...`);
             await axios.get(`${USUARIOS_API_URL}/${username}`, {
-                headers: { 'Authorization': req.headers['authorization'] }
+                headers: { 'Authorization': authHeader }
             });
-            console.log(`[controllerFollow] INFO: Usuario ${username} verificado.`);
-
+            console.log(`[controllerRelaciones] INFO: Usuario ${username} verificado.`);
         } catch (error) {
-            if (error.response && error.response.status === 404) {
-                console.warn(`[controllerFollow] NOT_FOUND: El usuario a seguir (${username}) no existe.`);
-                return res.status(404).json({
-                    status: 'error',
-                    mensaje: 'El usuario al que intentas seguir no existe o no esta verificado.'
-                });
-            }
-            console.error('[controllerFollow] ERROR: Token Invalido', error.message);
+            console.warn(`[controllerRelaciones] AUTH_FAIL: Token inválido para ${username}.`);
             return res.status(401).json({
                 status: 'error',
-                mensaje: 'No te encuentras Logeado en el sistema'
+                mensaje: 'No te encuentras logueado en el sistema.'
             });
         }
-        const listaSeguidos = await FollowModel.obtenerSeguidosPor(username);
 
-        // 2. Respuesta Exitosa
-        console.log(`[controllerFollow] SUCCESS: Se devolvieron ${listaSeguidos.length} usuarios seguidos por ${username}.`);
-        res.status(200).json({
-            status: 'success',
-            data: listaSeguidos
+        // 2. OBTENER LISTA DE SEGUIDOS (Llamada al Modelo Local)
+        // (Esta lógica ya la tenías en esta función)
+        const listaSeguidos = await FollowModel.obtenerSeguidosPor(username);
+        
+        if (listaSeguidos.length === 0) {
+            console.log(`[controllerRelaciones] INFO: ${username} no sigue a nadie.`);
+            return res.status(200).json({ status: 'success', data: [] });
+        }
+
+        // Convertimos el resultado (ej. [{ usuario_principal_username: 'userA' }])
+        // en un arreglo simple de strings (ej. ['userA'])
+        const usernamesSeguidos = listaSeguidos.map(s => s.usuario_principal_username);
+        console.log(`[controllerRelaciones] INFO: ${username} sigue a:`, usernamesSeguidos);
+
+        // 3. OBTENER MENSAJES POR CADA USUARIO SEGUIDO (Orquestación)
+        
+        // Creamos un arreglo de "promesas", una por cada llamada a la API de Mensajes
+        const promesasDeMensajes = usernamesSeguidos.map(usernameSeguido => {
+            console.log(`[controllerRelaciones] INFO: Llamando a Microservicio Mensajes para ${usernameSeguido}...`);
+            return axios.get(`${MENSAJES_API_URL}/${usernameSeguido}`, {
+                headers: { 'Authorization': authHeader } // Pasamos el token
+            });
         });
 
+        // Ejecutamos todas las llamadas en paralelo y esperamos a que terminen
+        const respuestasMensajes = await Promise.all(promesasDeMensajes);
+
+        const timelineAgrupado = usernamesSeguidos.map((usernameSeguido, index) => {
+            const respuesta = respuestasMensajes[index];
+            let mensajesLimpios = [];
+
+            // Verificamos que la respuesta fue exitosa y trajo datos
+            if (respuesta.data && respuesta.data.data && respuesta.data.data.length > 0) {
+                
+                // Limpiamos los mensajes para que coincidan con el formato solicitado
+                // (Omitiendo 'username_autor', ya que es implícito en 'siguiendo')
+                mensajesLimpios = respuesta.data.data.map(msg => {
+                    return {
+                        id: msg.id,
+                        contenido: msg.contenido,
+                        fecha_creacion: msg.fecha_creacion
+                    };
+                });
+                // Nota: Los mensajes ya vienen ordenados por fecha desde el
+                // microservicio de Mensajes.
+            }
+
+            // Devolvemos el objeto en el formato solicitado
+            return {
+                siguiendo: usernameSeguido,
+                mensajes: mensajesLimpios
+            };
+        });
+
+        // 5. RESPUESTA EXITOSA
+        console.log(`[controllerRelaciones] SUCCESS: Timeline de ${username} devuelto (${timelineAgrupado.length} mensajes).`);
+        res.status(200).json({
+            status: 'success',
+            data: timelineAgrupado
+        });
 
     } catch (error) {
-        console.error(`[controllerFollow] ERROR: Error interno en obtenerSeguidos (user: ${username}):`, error.message);
+        // Captura errores de la llamada al modelo local o de las llamadas axios
+        console.error(`[controllerRelaciones] ERROR: Error interno en getRelacionesPorUsuario (user: ${username}):`, error.message);
         res.status(500).json({
             status: 'error',
-            mensaje: 'Error interno del servidor al consultar los seguimientos.'
+            mensaje: 'Error interno del servidor al construir el timeline.'
         });
     }
 };
